@@ -21,6 +21,7 @@ option(VP_WITH_PADDLE "prepared PaddlePaddle or not?" OFF)
 option(VP_WITH_KAFKA "prepared Kafka or not?" OFF)
 option(VP_WITH_LLM "prepared LLM or not?" OFF)
 option(VP_WITH_FFMPEG "prepared FFMPEG or not?" OFF)
+option(VP_WITH_ONNXRUNTIME "prepared ONNXRuntime or not?" OFF)
 option(VP_BUILD_COMPLEX_SAMPLES "build complex samples or not? (maybe source code not provided)" OFF)
 
 # OpenCV required
@@ -111,6 +112,20 @@ endif()
 if(VP_WITH_FFMPEG)
     add_definitions(-DVP_WITH_FFMPEG)
     list(APPEND VP_DEPEND_LIBS avcodec avformat avdevice swscale swresample avutil)
+endif()
+
+# optional for ONNXRuntime
+if(VP_WITH_ONNXRUNTIME)
+    add_definitions(-DVP_WITH_ONNXRUNTIME)
+    if(NOT ONNXRUNTIME_INCLUDE_DIR)
+        message(FATAL_ERROR "ONNXRUNTIME_INCLUDE_DIR is required when VP_WITH_ONNXRUNTIME=ON")
+    endif()
+    if(NOT ONNXRUNTIME_LIB_DIR)
+        message(FATAL_ERROR "ONNXRUNTIME_LIB_DIR is required when VP_WITH_ONNXRUNTIME=ON")
+    endif()
+    include_directories(${ONNXRUNTIME_INCLUDE_DIR})
+    link_directories(${ONNXRUNTIME_LIB_DIR})
+    list(APPEND VP_DEPEND_LIBS onnxruntime)
 endif()
 
 # tinyexpr

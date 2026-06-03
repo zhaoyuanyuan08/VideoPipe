@@ -10,6 +10,7 @@ namespace vp_nodes {
     {
     private:
         std::shared_ptr<trt_yolov8::trt_yolov8_detector> yolov8_detector = nullptr;
+        std::vector<int> class_ids_applied_to;
     protected:
         // we need a totally new logic for the whole infer combinations
         // no separate step pre-defined needed in base class
@@ -17,7 +18,7 @@ namespace vp_nodes {
         // override pure virtual method, for compile pass
         virtual void postprocess(const std::vector<cv::Mat>& raw_outputs, const std::vector<std::shared_ptr<vp_objects::vp_frame_meta>>& frame_meta_with_batch) override;
     public:
-        vp_trt_yolov8_detector(std::string node_name, std::string model_path, std::string labels_path = "");
+        vp_trt_yolov8_detector(std::string node_name, std::string model_path, std::string labels_path = "", std::vector<int> class_ids_applied_to = std::vector<int>());
         ~vp_trt_yolov8_detector();
     };
 }

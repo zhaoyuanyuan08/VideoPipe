@@ -123,6 +123,18 @@ if(VP_WITH_FFMPEG)
     target_link_libraries(ffmpeg_transcode_sample ${PROJECT_NAME})
 endif()
 
+# samples depend on ONNXRuntime
+if(VP_WITH_ONNXRUNTIME)
+    add_executable(rtmpose_onnx_sample "rtmpose_onnx_sample.cpp")
+    target_link_libraries(rtmpose_onnx_sample ${PROJECT_NAME})
+
+    add_executable(rtmpose_onnx_benchmark_sample "rtmpose_onnx_benchmark_sample.cpp")
+    target_link_libraries(rtmpose_onnx_benchmark_sample ${PROJECT_NAME})
+
+    add_executable(yolov8_person_pose_sample "yolov8_person_pose_sample.cpp")
+    target_link_libraries(yolov8_person_pose_sample ${PROJECT_NAME})
+endif()
+
 # samples depend on PaddlePaddle
 if(VP_WITH_PADDLE)
     add_executable(app_src_sample "app_src_sample.cpp")
@@ -197,6 +209,7 @@ if(VP_WITH_TRT)
 
     add_executable(rtmp_src_sample "rtmp_src_sample.cpp")
     target_link_libraries(rtmp_src_sample ${PROJECT_NAME})
+
 endif()
 
 if(VP_BUILD_COMPLEX_SAMPLES)

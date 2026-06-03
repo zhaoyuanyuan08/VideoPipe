@@ -2,13 +2,17 @@
 #ifdef VP_WITH_TRT
 #include "vp_trt_yolov8_detector.h"
 
+#include <algorithm>
+
 namespace vp_nodes {
     
     vp_trt_yolov8_detector::vp_trt_yolov8_detector(std::string node_name, 
                                                     std::string model_path,
-                                                    std::string labels_path):
+                                                    std::string labels_path,
+                                                    std::vector<int> class_ids_applied_to):
                                                     vp_primary_infer_node(node_name, "", "", labels_path) {
         yolov8_detector = std::make_shared<trt_yolov8::trt_yolov8_detector>(model_path);
+        this->class_ids_applied_to = class_ids_applied_to;
         this->initialized();
     }
     
@@ -38,6 +42,10 @@ namespace vp_nodes {
 
         for (int i = 0; i < detection_list.size(); i++) {
             auto& objbox = detection_list[i];
+            if (!class_ids_applied_to.empty() &&
+                std::find(class_ids_applied_to.begin(), class_ids_applied_to.end(), objbox.class_id) == class_ids_applied_to.end()) {
+                continue;
+            }
 
             // objbox.bbox: center_x center_y width height
             auto rect = get_rect(frame_meta->frame, objbox.bbox);  // convert to: x, y, width,height

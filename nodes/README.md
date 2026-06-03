@@ -63,6 +63,8 @@ file_src_1                                                                --> tr
   - vp_mask_rcnn_detector_node：基于maskrcnn的目标检测节点（opencv::dnn）
   - vp_openpose_detector_node：基于openpose的肢体检测节点（opencv::dnn）
   - vp_ppocr_text_detector_node：基于paddleocr的文字检测节点（paddleinference）
+  - vp_rtmpose_onnx_node：基于RTMPose的整帧姿态估计节点（onnxruntime）
+  - vp_rtmpose_onnx_secondary_node：基于RTMPose的裁剪姿态估计节点（onnxruntime）
   - vp_restoration_node：基于real-esrgan的图像增强修复节点（opencv::dnn）
   - vp_sface_feature_encoder_node：基于sface网络的人脸特征提取节点（opencv::dnn）
   - vp_trt_vehicle_color_classifier：基于resnet18的车辆颜色分类节点（tensorrt）
@@ -72,6 +74,8 @@ file_src_1                                                                --> tr
   - vp_trt_vehicle_plate_detector：基于yolov5s的车牌检测识别节点（二级推理）（tensorrt）
   - vp_trt_vehicle_scanner：基于yolov5s的车身扫描节点（tensorrt）
   - vp_trt_vehicle_type_classifier：基于resnet18的车辆车型分类节点（tensorrt）
+  - vp_trt_yolov8_detector：基于yolov8的目标检测节点（tensorrt，支持可选类别过滤）
+  - vp_trt_yolov8_pose_detector：基于yolov8的姿态估计节点（tensorrt）
   - vp_yolo_detector_node：基于yolov3（含tiny）的目标检测节点（opencv::dnn）
   - yolo_yunet_face_detector_node：基于yunet网络的人脸检测节点（opencv::dnn）
 
