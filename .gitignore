@@ -21,6 +21,8 @@ __pycache__/
 *.weights
 *.h264
 *.trt
+*.engine
+*.plan
 models/
 test_video/
 log/
@@ -161,4 +163,6 @@ build/*
 build-*/
 third_party/onnxruntime-gpu/
 third_party/tensorrt_python/
+tensorRT/
+vp_data/
 vp_analysis_board.png

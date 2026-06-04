@@ -212,6 +212,16 @@ if(VP_WITH_TRT)
 
 endif()
 
+if(VP_WITH_TRT AND VP_WITH_ONNXRUNTIME)
+    add_executable(yolov8_person_pose_trt_sample "yolov8_person_pose_trt_sample.cpp")
+    target_link_libraries(yolov8_person_pose_trt_sample ${PROJECT_NAME})
+endif()
+
+if(VP_WITH_TENSORRT_RUNTIME)
+    add_executable(yolov8_person_pose_trtexec_sample "yolov8_person_pose_trtexec_sample.cpp")
+    target_link_libraries(yolov8_person_pose_trtexec_sample ${PROJECT_NAME})
+endif()
+
 if(VP_BUILD_COMPLEX_SAMPLES)
     message("start build for complex sampels...")
     # save exe to 'face_recognize'

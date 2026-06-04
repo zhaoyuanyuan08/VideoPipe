@@ -1,0 +1,14 @@
+[project]
+name = "videopipe-hospital-monitor-web"
+version = "0.1.0"
+description = "Hospital monitor web sidecar for VideoPipe person-pose pipelines."
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "opencv-python",
+    "numpy",
+]
+
+[tool.uv]
+package = false

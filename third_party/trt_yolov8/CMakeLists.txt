@@ -9,9 +9,14 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -fPIC -w -fdiagnostics-color=always -
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/libs)
 
 # TensorRT required
-include_directories("/usr/local/tensorRT/include")   # change this line if possible
-link_directories("/usr/local/tensorRT/lib")          # change this line if possible
-set(CMAKE_CUDA_COMPILER "/usr/local/cuda/bin/nvcc")  # change this line if possible
+if(NOT TENSORRT_ROOT)
+    set(TENSORRT_ROOT "/usr/local/tensorRT")
+endif()
+include_directories("${TENSORRT_ROOT}/include")
+link_directories("${TENSORRT_ROOT}/lib")
+if(NOT CMAKE_CUDA_COMPILER)
+    set(CMAKE_CUDA_COMPILER "/usr/local/cuda/bin/nvcc")
+endif()
 enable_language(CUDA)
 
 # CUDA required

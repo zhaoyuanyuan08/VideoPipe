@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hospital Patient Monitor</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="video-pane">
+        <img id="video" src="/api/video/stream" alt="Live patient monitor" />
+      </section>
+      <aside class="side">
+        <div id="alert" class="alert">No alert</div>
+        <div class="metric">
+          <span>State</span>
+          <strong id="state">unknown</strong>
+        </div>
+        <div class="metric">
+          <span>Confidence</span>
+          <strong id="confidence">0.00</strong>
+        </div>
+        <div class="metric">
+          <span>Visible keypoints</span>
+          <strong id="keypoints">0</strong>
+        </div>
+        <div class="metric">
+          <span>Latency</span>
+          <strong id="latency">-</strong>
+        </div>
+        <div class="metric">
+          <span>Camera</span>
+          <strong id="camera">disconnected</strong>
+        </div>
+        <div class="device-row">
+          <select id="device">
+            <option value="">Detecting cameras...</option>
+          </select>
+          <button id="refresh" type="button">Refresh</button>
+        </div>
+        <div class="controls">
+          <button id="connect" type="button">Connect</button>
+          <button id="disconnect" type="button">Disconnect</button>
+        </div>
+        <p id="reason" class="reason">Waiting for monitor state.</p>
+      </aside>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

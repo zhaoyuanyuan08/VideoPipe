@@ -22,6 +22,7 @@ option(VP_WITH_KAFKA "prepared Kafka or not?" OFF)
 option(VP_WITH_LLM "prepared LLM or not?" OFF)
 option(VP_WITH_FFMPEG "prepared FFMPEG or not?" OFF)
 option(VP_WITH_ONNXRUNTIME "prepared ONNXRuntime or not?" OFF)
+option(VP_WITH_TENSORRT_RUNTIME "prepared TensorRT runtime API or not?" OFF)
 option(VP_BUILD_COMPLEX_SAMPLES "build complex samples or not? (maybe source code not provided)" OFF)
 
 # OpenCV required
@@ -126,6 +127,19 @@ if(VP_WITH_ONNXRUNTIME)
     include_directories(${ONNXRUNTIME_INCLUDE_DIR})
     link_directories(${ONNXRUNTIME_LIB_DIR})
     list(APPEND VP_DEPEND_LIBS onnxruntime)
+endif()
+
+# optional for TensorRT runtime API only
+if(VP_WITH_TENSORRT_RUNTIME)
+    add_definitions(-DVP_WITH_TENSORRT_RUNTIME)
+    if(NOT TENSORRT_ROOT)
+        message(FATAL_ERROR "TENSORRT_ROOT is required when VP_WITH_TENSORRT_RUNTIME=ON")
+    endif()
+    include_directories(${TENSORRT_ROOT}/include)
+    link_directories(${TENSORRT_ROOT}/lib)
+    include_directories(/usr/local/cuda/include)
+    link_directories(/usr/local/cuda/lib64)
+    list(APPEND VP_DEPEND_LIBS nvinfer cudart)
 endif()
 
 # tinyexpr
