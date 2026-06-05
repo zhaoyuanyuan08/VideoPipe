@@ -31,7 +31,6 @@ sudo apt install -y \
   python3 \
   python3-dev \
   python3-pip \
-  python3-venv \
   python3-opencv \
   libopencv-dev \
   libgstreamer1.0-dev \
@@ -153,6 +152,7 @@ cmake -S . -B build-jetson-sdk \
   -DVP_WITH_TENSORRT_RUNTIME=ON \
   -DVP_BUILD_SDK=ON \
   -DTENSORRT_ROOT=$TENSORRT_ROOT \
+  -DCMAKE_CUDA_ARCHITECTURES=87 \
   -DVP_WITH_ONNXRUNTIME=OFF \
   -DVP_WITH_CUDA=OFF \
   -DVP_WITH_TRT=OFF \
