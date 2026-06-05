@@ -1,9 +1,9 @@
 #ifdef VP_WITH_TENSORRT_RUNTIME
 
 #include "vp_rtmpose_trtexec_secondary_node.h"
+#include "vp_trtexec_preprocess_cuda.h"
 
 #include <algorithm>
-#include <array>
 #include <cassert>
 #include <cstring>
 #include <fstream>
@@ -81,6 +81,21 @@ namespace vp_nodes {
 
     vp_rtmpose_trtexec_secondary_node::~vp_rtmpose_trtexec_secondary_node() {
         deinitialized();
+        if (frame_device != nullptr) {
+            cudaFree(frame_device);
+            frame_device = nullptr;
+        }
+        if (input_device != nullptr) {
+            cudaFree(input_device);
+            input_device = nullptr;
+        }
+        for (auto* ptr: output_devices) {
+            if (ptr != nullptr) {
+                cudaFree(ptr);
+            }
+        }
+        output_devices.clear();
+        output_device_bytes.clear();
         if (stream != nullptr) {
             cudaStreamDestroy(stream);
             stream = nullptr;
@@ -160,55 +175,75 @@ namespace vp_nodes {
         return BBox {x1, y1, x2, y2};
     }
 
-    std::vector<float> vp_rtmpose_trtexec_secondary_node::preprocess(const cv::Mat& image, const BBox& bbox) {
+    void vp_rtmpose_trtexec_secondary_node::ensure_device_buffer(
+        void** ptr,
+        size_t& current_bytes,
+        size_t required_bytes,
+        const char* name) {
+        if (current_bytes >= required_bytes && *ptr != nullptr) {
+            return;
+        }
+        if (*ptr != nullptr) {
+            check_cuda(cudaFree(*ptr), name);
+            *ptr = nullptr;
+            current_bytes = 0;
+        }
+        check_cuda(cudaMalloc(ptr, required_bytes), name);
+        current_bytes = required_bytes;
+    }
+
+    void vp_rtmpose_trtexec_secondary_node::upload_frame_cuda(const cv::Mat& image) {
+        if (image.empty()) {
+            throw std::runtime_error("RTMPose TensorRT input frame is empty");
+        }
+        if (image.type() != CV_8UC3) {
+            throw std::runtime_error("RTMPose TensorRT CUDA preprocess expects CV_8UC3 BGR frames");
+        }
+        const size_t frame_bytes = static_cast<size_t>(image.step[0]) * image.rows;
+        ensure_device_buffer(reinterpret_cast<void**>(&frame_device), frame_device_bytes, frame_bytes, "cudaMalloc RTMPose frame");
+        check_cuda(cudaMemcpyAsync(frame_device, image.data, frame_bytes, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync RTMPose frame");
+    }
+
+    void vp_rtmpose_trtexec_secondary_node::preprocess_cuda(const cv::Mat& image, const BBox& bbox) {
         auto x1 = std::max(0, std::min(image.cols - 1, bbox.x1));
         auto y1 = std::max(0, std::min(image.rows - 1, bbox.y1));
         auto x2 = std::max(0, std::min(image.cols, bbox.x2));
         auto y2 = std::max(0, std::min(image.rows, bbox.y2));
         assert(x2 > x1 && y2 > y1);
 
-        cv::Mat crop = image(cv::Rect(x1, y1, x2 - x1, y2 - y1));
-        cv::Mat resized;
-        cv::resize(crop, resized, cv::Size(input_width, input_height), 0, 0, cv::INTER_LINEAR);
-        cv::cvtColor(resized, resized, cv::COLOR_BGR2RGB);
-
-        const std::array<float, 3> mean = {0.485f, 0.456f, 0.406f};
-        const std::array<float, 3> stddev = {0.229f, 0.224f, 0.225f};
-        std::vector<float> tensor(3 * input_height * input_width);
-        for (int c = 0; c < 3; ++c) {
-            for (int y = 0; y < input_height; ++y) {
-                for (int x = 0; x < input_width; ++x) {
-                    float value = resized.at<cv::Vec3b>(y, x)[c] / 255.0f;
-                    tensor[c * input_height * input_width + y * input_width + x] = (value - mean[c]) / stddev[c];
-                }
-            }
-        }
-        return tensor;
+        const size_t input_bytes = dims_volume(input_dims) * sizeof(float);
+        ensure_device_buffer(&input_device, input_device_bytes, input_bytes, "cudaMalloc RTMPose input");
+        vp_rtmpose_crop_preprocess_cuda(
+            frame_device,
+            image.cols,
+            image.rows,
+            static_cast<int>(image.step[0]),
+            static_cast<float*>(input_device),
+            input_width,
+            input_height,
+            x1,
+            y1,
+            x2,
+            y2,
+            stream);
+        check_cuda(cudaGetLastError(), "RTMPose CUDA preprocess launch");
     }
 
-    std::vector<vp_rtmpose_trtexec_secondary_node::TensorOutput> vp_rtmpose_trtexec_secondary_node::infer_engine(
-        const std::vector<float>& input_tensor) {
+    std::vector<vp_rtmpose_trtexec_secondary_node::TensorOutput> vp_rtmpose_trtexec_secondary_node::infer_engine() {
         if (has_dynamic_dim(engine->getTensorShape(input_tensor_name.c_str()))) {
             if (!context->setInputShape(input_tensor_name.c_str(), input_dims)) {
                 throw std::runtime_error("failed to set TensorRT RTMPose input shape");
             }
         }
 
-        const size_t input_count = dims_volume(input_dims);
-        if (input_tensor.size() != input_count) {
-            throw std::runtime_error("RTMPose input tensor size mismatch");
-        }
-
         std::vector<TensorOutput> outputs;
         outputs.reserve(output_tensor_names.size());
-        size_t output_total_count = 0;
         for (auto& name: output_tensor_names) {
             auto dims = context->getTensorShape(name.c_str());
             if (has_dynamic_dim(dims)) {
                 throw std::runtime_error("TensorRT RTMPose output shape is still dynamic after setting input shape");
             }
             auto count = dims_volume(dims);
-            output_total_count += count;
             TensorOutput output;
             output.name = name;
             output.dims = dims;
@@ -216,45 +251,35 @@ namespace vp_nodes {
             outputs.push_back(std::move(output));
         }
 
-        void* input_device = nullptr;
-        std::vector<void*> output_devices(output_tensor_names.size(), nullptr);
-        check_cuda(cudaMalloc(&input_device, input_count * sizeof(float)), "cudaMalloc RTMPose input");
+        if (output_devices.size() < outputs.size()) {
+            output_devices.resize(outputs.size(), nullptr);
+            output_device_bytes.resize(outputs.size(), 0);
+        }
         for (size_t i = 0; i < outputs.size(); ++i) {
-            check_cuda(cudaMalloc(&output_devices[i], outputs[i].data.size() * sizeof(float)), "cudaMalloc RTMPose output");
+            ensure_device_buffer(
+                &output_devices[i],
+                output_device_bytes[i],
+                outputs[i].data.size() * sizeof(float),
+                "cudaMalloc RTMPose output");
         }
 
-        try {
-            check_cuda(cudaMemcpyAsync(input_device, input_tensor.data(), input_count * sizeof(float), cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync RTMPose input");
-            if (!context->setTensorAddress(input_tensor_name.c_str(), input_device)) {
-                throw std::runtime_error("failed to set RTMPose input tensor address");
-            }
-            for (size_t i = 0; i < outputs.size(); ++i) {
-                if (!context->setTensorAddress(outputs[i].name.c_str(), output_devices[i])) {
-                    throw std::runtime_error("failed to set RTMPose output tensor address");
-                }
-            }
-            if (!context->enqueueV3(stream)) {
-                throw std::runtime_error("TensorRT RTMPose enqueueV3 failed");
-            }
-
-            for (size_t i = 0; i < outputs.size(); ++i) {
-                check_cuda(cudaMemcpyAsync(outputs[i].data.data(), output_devices[i], outputs[i].data.size() * sizeof(float), cudaMemcpyDeviceToHost, stream), "cudaMemcpyAsync RTMPose output");
-            }
-            check_cuda(cudaStreamSynchronize(stream), "cudaStreamSynchronize RTMPose");
-
-            cudaFree(input_device);
-            for (auto* ptr: output_devices) {
-                cudaFree(ptr);
-            }
-            return outputs;
+        if (!context->setTensorAddress(input_tensor_name.c_str(), input_device)) {
+            throw std::runtime_error("failed to set RTMPose input tensor address");
         }
-        catch (...) {
-            cudaFree(input_device);
-            for (auto* ptr: output_devices) {
-                cudaFree(ptr);
+        for (size_t i = 0; i < outputs.size(); ++i) {
+            if (!context->setTensorAddress(outputs[i].name.c_str(), output_devices[i])) {
+                throw std::runtime_error("failed to set RTMPose output tensor address");
             }
-            throw;
         }
+        if (!context->enqueueV3(stream)) {
+            throw std::runtime_error("TensorRT RTMPose enqueueV3 failed");
+        }
+
+        for (size_t i = 0; i < outputs.size(); ++i) {
+            check_cuda(cudaMemcpyAsync(outputs[i].data.data(), output_devices[i], outputs[i].data.size() * sizeof(float), cudaMemcpyDeviceToHost, stream), "cudaMemcpyAsync RTMPose output");
+        }
+        check_cuda(cudaStreamSynchronize(stream), "cudaStreamSynchronize RTMPose");
+        return outputs;
     }
 
     std::vector<vp_objects::vp_pose_keypoint> vp_rtmpose_trtexec_secondary_node::decode_simcc(
@@ -354,6 +379,7 @@ namespace vp_nodes {
         long infer_ms = 0;
         long postprocess_ms = 0;
         int infer_count = 0;
+        bool frame_uploaded = false;
 
         for (auto& target: frame_meta->targets) {
             if (!need_apply(target->primary_class_id, target->width, target->height)) {
@@ -365,12 +391,17 @@ namespace vp_nodes {
                 continue;
             }
 
+            if (!frame_uploaded) {
+                upload_frame_cuda(frame_meta->frame);
+                frame_uploaded = true;
+            }
+
             start_time = std::chrono::system_clock::now();
-            auto tensor = preprocess(frame_meta->frame, bbox);
+            preprocess_cuda(frame_meta->frame, bbox);
             preprocess_ms += std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - start_time).count();
 
             start_time = std::chrono::system_clock::now();
-            auto outputs = infer_engine(tensor);
+            auto outputs = infer_engine();
             infer_ms += std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - start_time).count();
 
             start_time = std::chrono::system_clock::now();

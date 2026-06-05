@@ -42,6 +42,12 @@ namespace vp_nodes {
         nvinfer1::ICudaEngine* engine = nullptr;
         nvinfer1::IExecutionContext* context = nullptr;
         cudaStream_t stream = nullptr;
+        void* input_device = nullptr;
+        unsigned char* frame_device = nullptr;
+        std::vector<void*> output_devices;
+        size_t input_device_bytes = 0;
+        size_t frame_device_bytes = 0;
+        std::vector<size_t> output_device_bytes;
 
         std::string input_tensor_name;
         std::vector<std::string> output_tensor_names;
@@ -55,8 +61,10 @@ namespace vp_nodes {
         int device_id;
 
         void load_engine(const std::string& engine_path);
-        std::vector<float> preprocess(const cv::Mat& image, const BBox& bbox);
-        std::vector<TensorOutput> infer_engine(const std::vector<float>& input_tensor);
+        void ensure_device_buffer(void** ptr, size_t& current_bytes, size_t required_bytes, const char* name);
+        void upload_frame_cuda(const cv::Mat& image);
+        void preprocess_cuda(const cv::Mat& image, const BBox& bbox);
+        std::vector<TensorOutput> infer_engine();
         std::vector<vp_objects::vp_pose_keypoint> decode_outputs(
             const std::vector<TensorOutput>& outputs,
             const BBox& bbox);

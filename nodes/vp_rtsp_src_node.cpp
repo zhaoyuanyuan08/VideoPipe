@@ -7,6 +7,21 @@
 #include "vp_rtsp_src_node.h"
 #include "../utils/vp_utils.h"
 
+namespace {
+    std::string normalize_gst_decoder(const std::string& decoder) {
+        if (decoder == "jetson_hw") {
+            return "nvv4l2decoder ! nvvidconv ! video/x-raw,format=BGRx";
+        }
+        if (decoder == "deepstream_hw") {
+            return "nvv4l2decoder ! nvvideoconvert ! video/x-raw,format=BGRx";
+        }
+        if (decoder == "x86_nv") {
+            return "nvh264dec ! cudaconvert ! video/x-raw(memory:CUDAMemory),format=BGRx ! cudadownload";
+        }
+        return decoder;
+    }
+}
+
 namespace vp_nodes {
         
     vp_rtsp_src_node::vp_rtsp_src_node(std::string node_name, 
@@ -16,9 +31,9 @@ namespace vp_nodes {
                                         std::string gst_decoder_name,
                                         int skip_interval): 
                                         vp_src_node(node_name, channel_index, resize_ratio),
-                                        rtsp_url(rtsp_url), gst_decoder_name(gst_decoder_name), skip_interval(skip_interval) {
+                                        rtsp_url(rtsp_url), gst_decoder_name(normalize_gst_decoder(gst_decoder_name)), skip_interval(skip_interval) {
         assert(skip_interval >= 0 && skip_interval <= 9);
-        this->gst_template = vp_utils::string_format(this->gst_template, rtsp_url.c_str(), gst_decoder_name.c_str());
+        this->gst_template = vp_utils::string_format(this->gst_template, rtsp_url.c_str(), this->gst_decoder_name.c_str());
         VP_INFO(vp_utils::string_format("[%s] [%s]", node_name.c_str(), gst_template.c_str()));
         this->initialized();
     }

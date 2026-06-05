@@ -30,6 +30,13 @@ namespace vp_nodes {
         nvinfer1::ICudaEngine* engine = nullptr;
         nvinfer1::IExecutionContext* context = nullptr;
         cudaStream_t stream = nullptr;
+        void* input_device = nullptr;
+        void* output_device = nullptr;
+        unsigned char* frame_device = nullptr;
+        size_t input_device_bytes = 0;
+        size_t output_device_bytes = 0;
+        size_t frame_device_bytes = 0;
+        std::vector<float> output_host;
 
         std::string input_tensor_name;
         std::string output_tensor_name;
@@ -42,8 +49,9 @@ namespace vp_nodes {
         std::vector<int> class_ids_applied_to;
 
         void load_engine(const std::string& engine_path);
-        LetterboxMeta preprocess_letterbox(const cv::Mat& image, cv::Mat& blob_to_infer);
-        cv::Mat infer_engine(const cv::Mat& blob_to_infer);
+        void ensure_device_buffer(void** ptr, size_t& current_bytes, size_t required_bytes, const char* name);
+        LetterboxMeta preprocess_letterbox_cuda(const cv::Mat& image);
+        cv::Mat infer_engine();
         std::vector<std::pair<cv::Rect, std::pair<int, float>>> decode_predictions(
             const cv::Mat& output,
             const LetterboxMeta& meta);

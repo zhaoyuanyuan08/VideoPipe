@@ -1,0 +1,66 @@
+ARG L4T_TAG=r36.4.0
+FROM nvcr.io/nvidia/l4t-jetpack:${L4T_TAG}
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV VP_ROOT=/workspace/VideoPipe
+ENV TENSORRT_ROOT=/workspace/jetson_tensorrt
+ENV LD_LIBRARY_PATH=/workspace/jetson_tensorrt/lib:/usr/local/cuda/lib64:${LD_LIBRARY_PATH}
+ENV UV_SYSTEM_PYTHON=1
+
+WORKDIR /workspace
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    ca-certificates \
+    cmake \
+    curl \
+    git \
+    pkg-config \
+    python3 \
+    python3-pip \
+    python3-venv \
+    python3-opencv \
+    libopencv-dev \
+    libgstreamer1.0-dev \
+    libgstreamer-plugins-base1.0-dev \
+    libgstrtspserver-1.0-dev \
+    gstreamer1.0-tools \
+    gstreamer1.0-plugins-base \
+    gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-bad \
+    gstreamer1.0-libav \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH=/root/.local/bin:${PATH}
+
+RUN mkdir -p /workspace/jetson_tensorrt \
+    && ln -sfn /usr/include/aarch64-linux-gnu /workspace/jetson_tensorrt/include \
+    && ln -sfn /usr/lib/aarch64-linux-gnu /workspace/jetson_tensorrt/lib
+
+COPY . ${VP_ROOT}
+
+RUN cmake -S ${VP_ROOT} -B ${VP_ROOT}/build-jetson-trtexec \
+      -DVP_WITH_TENSORRT_RUNTIME=ON \
+      -DTENSORRT_ROOT=${TENSORRT_ROOT} \
+      -DVP_WITH_ONNXRUNTIME=OFF \
+      -DVP_WITH_CUDA=OFF \
+      -DVP_WITH_TRT=OFF \
+      -DVP_WITH_PADDLE=OFF \
+      -DVP_WITH_KAFKA=OFF \
+      -DVP_WITH_LLM=OFF \
+      -DVP_WITH_FFMPEG=OFF \
+    && cmake --build ${VP_ROOT}/build-jetson-trtexec \
+      --target yolov8_person_pose_trtexec_sample \
+      -j$(nproc)
+
+RUN cd ${VP_ROOT}/apps/hospital_monitor_web \
+    && uv venv --system-site-packages \
+    && uv pip install fastapi "uvicorn[standard]" numpy \
+    && uv run --no-sync python -c "import fastapi, uvicorn, cv2, numpy"
+
+RUN chmod +x ${VP_ROOT}/scripts/jetson_entrypoint.sh
+
+EXPOSE 9301
+
+ENTRYPOINT ["/workspace/VideoPipe/scripts/jetson_entrypoint.sh"]

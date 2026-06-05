@@ -1,6 +1,7 @@
 #ifdef VP_WITH_TENSORRT_RUNTIME
 
 #include "vp_yolov8_trtexec_detector_node.h"
+#include "vp_trtexec_preprocess_cuda.h"
 
 #include <algorithm>
 #include <fstream>
@@ -79,6 +80,18 @@ namespace vp_nodes {
 
     vp_yolov8_trtexec_detector_node::~vp_yolov8_trtexec_detector_node() {
         deinitialized();
+        if (frame_device != nullptr) {
+            cudaFree(frame_device);
+            frame_device = nullptr;
+        }
+        if (input_device != nullptr) {
+            cudaFree(input_device);
+            input_device = nullptr;
+        }
+        if (output_device != nullptr) {
+            cudaFree(output_device);
+            output_device = nullptr;
+        }
         if (stream != nullptr) {
             cudaStreamDestroy(stream);
             stream = nullptr;
@@ -135,31 +148,63 @@ namespace vp_nodes {
         this->input_width = input_dims.d[3];
     }
 
-    vp_yolov8_trtexec_detector_node::LetterboxMeta vp_yolov8_trtexec_detector_node::preprocess_letterbox(
-        const cv::Mat& image,
-        cv::Mat& blob_to_infer) {
+    void vp_yolov8_trtexec_detector_node::ensure_device_buffer(
+        void** ptr,
+        size_t& current_bytes,
+        size_t required_bytes,
+        const char* name) {
+        if (current_bytes >= required_bytes && *ptr != nullptr) {
+            return;
+        }
+        if (*ptr != nullptr) {
+            check_cuda(cudaFree(*ptr), name);
+            *ptr = nullptr;
+            current_bytes = 0;
+        }
+        check_cuda(cudaMalloc(ptr, required_bytes), name);
+        current_bytes = required_bytes;
+    }
+
+    vp_yolov8_trtexec_detector_node::LetterboxMeta vp_yolov8_trtexec_detector_node::preprocess_letterbox_cuda(
+        const cv::Mat& image) {
+        if (image.empty()) {
+            throw std::runtime_error("YOLOv8 TensorRT input frame is empty");
+        }
+        if (image.type() != CV_8UC3) {
+            throw std::runtime_error("YOLOv8 TensorRT CUDA preprocess expects CV_8UC3 BGR frames");
+        }
         const int image_w = image.cols;
         const int image_h = image.rows;
         const float scale = std::min(static_cast<float>(input_width) / image_w, static_cast<float>(input_height) / image_h);
         const int resized_w = static_cast<int>(std::round(image_w * scale));
         const int resized_h = static_cast<int>(std::round(image_h * scale));
-
-        cv::Mat resized;
-        cv::resize(image, resized, cv::Size(resized_w, resized_h), 0, 0, cv::INTER_LINEAR);
-        cv::Mat canvas(input_height, input_width, CV_8UC3, cv::Scalar(114, 114, 114));
         const float pad_x = (input_width - resized_w) / 2.0f;
         const float pad_y = (input_height - resized_h) / 2.0f;
         const int left = static_cast<int>(std::round(pad_x - 0.1f));
         const int top = static_cast<int>(std::round(pad_y - 0.1f));
-        resized.copyTo(canvas(cv::Rect(left, top, resized_w, resized_h)));
 
-        cv::Mat rgb;
-        cv::cvtColor(canvas, rgb, cv::COLOR_BGR2RGB);
-        cv::dnn::blobFromImage(rgb, blob_to_infer, 1.0 / 255.0, cv::Size(input_width, input_height), cv::Scalar(), false, false);
+        const size_t frame_bytes = static_cast<size_t>(image.step[0]) * image.rows;
+        const size_t input_bytes = dims_volume(input_dims) * sizeof(float);
+        ensure_device_buffer(reinterpret_cast<void**>(&frame_device), frame_device_bytes, frame_bytes, "cudaMalloc YOLO frame");
+        ensure_device_buffer(&input_device, input_device_bytes, input_bytes, "cudaMalloc YOLO input");
+        check_cuda(cudaMemcpyAsync(frame_device, image.data, frame_bytes, cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync YOLO frame");
+        vp_yolo_letterbox_preprocess_cuda(
+            frame_device,
+            image_w,
+            image_h,
+            static_cast<int>(image.step[0]),
+            static_cast<float*>(input_device),
+            input_width,
+            input_height,
+            scale,
+            static_cast<float>(left),
+            static_cast<float>(top),
+            stream);
+        check_cuda(cudaGetLastError(), "YOLO CUDA preprocess launch");
         return LetterboxMeta {scale, static_cast<float>(left), static_cast<float>(top), image_w, image_h};
     }
 
-    cv::Mat vp_yolov8_trtexec_detector_node::infer_engine(const cv::Mat& blob_to_infer) {
+    cv::Mat vp_yolov8_trtexec_detector_node::infer_engine() {
         if (has_dynamic_dim(engine->getTensorShape(input_tensor_name.c_str()))) {
             if (!context->setInputShape(input_tensor_name.c_str(), input_dims)) {
                 throw std::runtime_error("failed to set TensorRT input shape");
@@ -170,43 +215,29 @@ namespace vp_nodes {
         if (has_dynamic_dim(output_dims)) {
             throw std::runtime_error("TensorRT output shape is still dynamic after setting input shape");
         }
-        const size_t input_count = dims_volume(input_dims);
         const size_t output_count = dims_volume(output_dims);
-        void* input_device = nullptr;
-        void* output_device = nullptr;
-        check_cuda(cudaMalloc(&input_device, input_count * sizeof(float)), "cudaMalloc input");
-        check_cuda(cudaMalloc(&output_device, output_count * sizeof(float)), "cudaMalloc output");
+        ensure_device_buffer(&output_device, output_device_bytes, output_count * sizeof(float), "cudaMalloc YOLO output");
 
-        try {
-            check_cuda(cudaMemcpyAsync(input_device, blob_to_infer.ptr<float>(), input_count * sizeof(float), cudaMemcpyHostToDevice, stream), "cudaMemcpyAsync input");
-            if (!context->setTensorAddress(input_tensor_name.c_str(), input_device) ||
-                !context->setTensorAddress(output_tensor_name.c_str(), output_device)) {
-                throw std::runtime_error("failed to set TensorRT tensor address");
-            }
-            if (!context->enqueueV3(stream)) {
-                throw std::runtime_error("TensorRT enqueueV3 failed");
-            }
-
-            std::vector<float> output(output_count);
-            check_cuda(cudaMemcpyAsync(output.data(), output_device, output_count * sizeof(float), cudaMemcpyDeviceToHost, stream), "cudaMemcpyAsync output");
-            check_cuda(cudaStreamSynchronize(stream), "cudaStreamSynchronize");
-
-            std::vector<int> sizes;
-            sizes.reserve(output_dims.nbDims);
-            for (int i = 0; i < output_dims.nbDims; ++i) {
-                sizes.push_back(output_dims.d[i]);
-            }
-            cv::Mat output_mat(output_dims.nbDims, sizes.data(), CV_32F);
-            std::memcpy(output_mat.ptr<float>(), output.data(), output_count * sizeof(float));
-            cudaFree(input_device);
-            cudaFree(output_device);
-            return output_mat;
+        if (!context->setTensorAddress(input_tensor_name.c_str(), input_device) ||
+            !context->setTensorAddress(output_tensor_name.c_str(), output_device)) {
+            throw std::runtime_error("failed to set TensorRT tensor address");
         }
-        catch (...) {
-            cudaFree(input_device);
-            cudaFree(output_device);
-            throw;
+        if (!context->enqueueV3(stream)) {
+            throw std::runtime_error("TensorRT enqueueV3 failed");
         }
+
+        output_host.resize(output_count);
+        check_cuda(cudaMemcpyAsync(output_host.data(), output_device, output_count * sizeof(float), cudaMemcpyDeviceToHost, stream), "cudaMemcpyAsync output");
+        check_cuda(cudaStreamSynchronize(stream), "cudaStreamSynchronize");
+
+        std::vector<int> sizes;
+        sizes.reserve(output_dims.nbDims);
+        for (int i = 0; i < output_dims.nbDims; ++i) {
+            sizes.push_back(output_dims.d[i]);
+        }
+        cv::Mat output_mat(output_dims.nbDims, sizes.data(), CV_32F);
+        std::memcpy(output_mat.ptr<float>(), output_host.data(), output_count * sizeof(float));
+        return output_mat;
     }
 
     std::vector<std::pair<cv::Rect, std::pair<int, float>>> vp_yolov8_trtexec_detector_node::decode_predictions(
@@ -342,15 +373,14 @@ namespace vp_nodes {
         auto& frame_meta = frame_meta_with_batch[0];
 
         auto start_time = std::chrono::system_clock::now();
-        cv::Mat blob_to_infer;
         auto prepare_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - start_time);
 
         start_time = std::chrono::system_clock::now();
-        auto meta = preprocess_letterbox(frame_meta->frame, blob_to_infer);
+        auto meta = preprocess_letterbox_cuda(frame_meta->frame);
         auto preprocess_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - start_time);
 
         start_time = std::chrono::system_clock::now();
-        auto output = infer_engine(blob_to_infer);
+        auto output = infer_engine();
         auto infer_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - start_time);
 
         start_time = std::chrono::system_clock::now();

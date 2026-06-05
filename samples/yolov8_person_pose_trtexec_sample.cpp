@@ -37,7 +37,7 @@ int main(int argc, char** argv) {
         640,
         1,
         0,
-        0.35f,
+        0.25f,
         0.45f,
         20,
         std::vector<int>{0},

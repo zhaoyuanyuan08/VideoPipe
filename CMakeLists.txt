@@ -24,6 +24,7 @@ option(VP_WITH_FFMPEG "prepared FFMPEG or not?" OFF)
 option(VP_WITH_ONNXRUNTIME "prepared ONNXRuntime or not?" OFF)
 option(VP_WITH_TENSORRT_RUNTIME "prepared TensorRT runtime API or not?" OFF)
 option(VP_BUILD_COMPLEX_SAMPLES "build complex samples or not? (maybe source code not provided)" OFF)
+option(VP_BUILD_SDK "build VideoPipe SDK wrapper or not?" OFF)
 
 # OpenCV required
 find_package(OpenCV REQUIRED)
@@ -132,8 +133,14 @@ endif()
 # optional for TensorRT runtime API only
 if(VP_WITH_TENSORRT_RUNTIME)
     add_definitions(-DVP_WITH_TENSORRT_RUNTIME)
+    enable_language(CUDA)
+    set(CMAKE_CUDA_STANDARD 17)
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=-fPIC")
     if(NOT TENSORRT_ROOT)
         message(FATAL_ERROR "TENSORRT_ROOT is required when VP_WITH_TENSORRT_RUNTIME=ON")
+    endif()
+    if(NOT EXISTS "${TENSORRT_ROOT}/include/NvInferRuntime.h")
+        message(FATAL_ERROR "NvInferRuntime.h not found under ${TENSORRT_ROOT}/include")
     endif()
     include_directories(${TENSORRT_ROOT}/include)
     link_directories(${TENSORRT_ROOT}/lib)
@@ -187,10 +194,13 @@ message("-------------collect version info--------------")
 
 # collect source files for videopipe
 file(GLOB_RECURSE NODES "nodes/*.cpp")
+if(VP_WITH_TENSORRT_RUNTIME)
+    file(GLOB_RECURSE CUDA_NODES "nodes/*.cu")
+endif()
 file(GLOB_RECURSE OBJECTS "objects/*.cpp")
 file(GLOB_RECURSE UTILS "utils/*.cpp")
 #...#
-list(APPEND VP_CPPS_SOURCES ${NODES} ${OBJECTS} ${UTILS})
+list(APPEND VP_CPPS_SOURCES ${NODES} ${CUDA_NODES} ${OBJECTS} ${UTILS})
 
 # build for videopipe
 add_library(${PROJECT_NAME} SHARED ${VP_CPPS_SOURCES})
@@ -198,3 +208,10 @@ target_link_libraries(${PROJECT_NAME} ${VP_DEPEND_LIBS})
 
 # build for samples
 add_subdirectory(samples)
+
+if(VP_BUILD_SDK)
+    if(NOT VP_WITH_TENSORRT_RUNTIME)
+        message(FATAL_ERROR "VP_BUILD_SDK requires VP_WITH_TENSORRT_RUNTIME=ON")
+    endif()
+    add_subdirectory(sdk)
+endif()
